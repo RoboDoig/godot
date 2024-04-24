@@ -2572,9 +2572,13 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 	if (draw_sky) {
 		RENDER_TIMESTAMP("Render Sky");
 
-		scene_state.enable_gl_depth_test(true);
-		scene_state.enable_gl_blend(false);
-		scene_state.set_gl_cull_mode(GLES3::SceneShaderData::CULL_BACK);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glDisable(GL_BLEND);
+		glEnable(GL_CULL_FACE);
+		glCullFace(GL_BACK);
+		scene_state.current_depth_test = GLES3::SceneShaderData::DEPTH_TEST_ENABLED;
+		scene_state.cull_mode = GLES3::SceneShaderData::CULL_BACK;
 
 		Projection projection = render_data.cam_projection;
 		if (is_reflection_probe) {
@@ -2922,11 +2926,35 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
 			scene_state.enable_gl_depth_test(shader->depth_test == GLES3::SceneShaderData::DEPTH_TEST_ENABLED);
 		}
 
-		if constexpr (p_pass_mode != PASS_MODE_SHADOW) {
-			if (shader->depth_draw == GLES3::SceneShaderData::DEPTH_DRAW_OPAQUE) {
-				scene_state.enable_gl_depth_draw((p_pass_mode == PASS_MODE_COLOR && !GLES3::Config::get_singleton()->use_depth_prepass) || p_pass_mode == PASS_MODE_DEPTH);
-			} else {
-				scene_state.enable_gl_depth_draw(shader->depth_draw == GLES3::SceneShaderData::DEPTH_DRAW_ALWAYS);
+		if (scene_state.current_depth_function != shader->depth_function) {
+			GLenum depth_function_table[GLES3::SceneShaderData::DEPTH_FUNCTION_MAX] = {
+				GL_LEQUAL,
+				GL_LESS,
+				GL_EQUAL,
+				GL_GREATER,
+				GL_NOTEQUAL,
+				GL_GEQUAL,
+				GL_ALWAYS,
+				GL_NEVER,
+			};
+
+			glDepthFunc(depth_function_table[shader->depth_function]);
+			scene_state.current_depth_function = shader->depth_function;
+		}
+
+		if (scene_state.current_depth_draw != shader->depth_draw) {
+			switch (shader->depth_draw) {
+				case GLES3::SceneShaderData::DEPTH_DRAW_OPAQUE: {
+					glDepthMask((p_pass_mode == PASS_MODE_COLOR && !GLES3::Config::get_singleton()->use_depth_prepass) ||
+							p_pass_mode == PASS_MODE_DEPTH ||
+							p_pass_mode == PASS_MODE_SHADOW);
+				} break;
+				case GLES3::SceneShaderData::DEPTH_DRAW_ALWAYS: {
+					glDepthMask(GL_TRUE);
+				} break;
+				case GLES3::SceneShaderData::DEPTH_DRAW_DISABLED: {
+					glDepthMask(GL_FALSE);
+				} break;
 			}
 		}
 
